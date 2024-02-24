@@ -1,0 +1,864 @@
+1- Baixe o visual studio community
+
+2- crie um novo projeto, digite na pesquisa 'web api'
+ - Crie o projeto API Web do ASP.NET Core
+
+3- Nomeie como sendo ms-usuario
+
+4- Estrutua escolha NET 6.0
+
+5- Acesse ferramentas
+ - Gerenciador de pacotes nuget
+ - Gerenciador de pacotes nuget para solução
+
+6- verifique as seguintes extensões instaladas:
+ - FluentValidation por Jeremy Skinner      11.7.1     11.9.0
+ - MediatR por Jimmy Bogard        12.1.1     12.2.0
+ - Microsoft.EntityFrameworkCore   por microsoft      7.0.11    8.0.2
+ - Microsofr.ENtityFrameworkCore.Design   por microsoft        7.0.11    8.0.2
+ - Microsoft.EntityFrameworkCore.Tools    por microsoft        7.0.11    8.0.2
+ - Microsoft.VisualStudio.Azure.Containers.Tools.Targets  por microsoft     1.18.1   1.19.6
+ - Npgsql.EntityFrameworkCore.PostgreSQL    por shay Rojansky....      7.0.4    8.0.2
+ - Swasgbuckle.AspNetCore por Swashbuckle ...            6.5.0
+
+7- Em ms-usuario crie uma nova pasta Features
+
+8- Dentro dessa pasta crie outra pasta chamada ContaFeature
+ - Dentro dessa pasta crie mais duas pastas: Commands e Queries
+
+9- Na pasta ContaFeature vamos criar um novo arquivo C# com nome ContaController, que ficara nossas rotas
+ - Coloque o seguinte código:
+
+namespace ms_usuario.Features.ContaFeature
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class ContaController : ControllerBase
+    {
+        private readonly IMediator _mediator;
+
+        public ContaController(IMediator mediator)
+        {
+            _mediator = mediator ?? throw new ArgumentNullException(nameof(mediator));
+        }
+
+        [HttpPost("inserir")]
+        //[Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
+        public async Task<ActionResult> Post(InserirContaCommand request)
+        {
+            return await this.SendAsync(_mediator, request);
+        }
+
+        [HttpPut("atualizar")]
+        //[Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
+        public async Task<ActionResult> Put(AtualizarContaCommand request)
+        {
+            return await this.SendAsync(_mediator, request);
+        }
+
+        [HttpDelete("excluir/{contaId}")]
+        //[Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
+        public async Task<ActionResult> Delete(long contaId)
+        {
+            return await this.SendAsync(_mediator, new RemoverContaCommand() { Id = contaId });
+        }
+
+        [HttpGet("selecionar-conta/{contaId}")]
+        public async Task<ActionResult> GetForum(long contaId)
+        {
+            return await this.SendAsync(_mediator, new SelecionarContaByIdQuery() { Id = contaId });
+        }
+
+        [HttpGet("selecionar-conta-many")]
+        public async Task<ActionResult> Get()
+        {
+            return await this.SendAsync(_mediator, new SelecionarContaFiltersQuery());
+        }
+    }
+}
+
+10 - Vamos criar o método SendAsync
+ - Crie uma nova pasta em ms-usuario chamada Extensions
+ - Dentro dela cria o arquivo c# ControllerExtensios com o seguinte código:
+
+namespace ms_usuario.Extensions
+{
+    public static class ControllerExtensions
+    {
+        public static long? IdUsuario;
+        public static async Task<ActionResult> SendAsync(this ControllerBase controller, IMediator mediator, object request)
+        {
+            try
+            {
+                if (controller.Request.Headers.Authorization != StringValues.Empty && controller.User.Claims.Any(item => item.Type == "idUsuario"))
+                    IdUsuario = Convert.ToInt64(controller.User.Claims.First(item => item.Type == "idUsuario").Value);
+                return controller.Ok(await mediator.Send(request));
+            }
+            catch (ArgumentNullException ex)
+            {
+                return controller.BadRequest(ex.Message);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return controller.StatusCode(403, ex.Message);
+            }
+            catch (DuplicateNameException ex)
+            {
+                return controller.Conflict(ex.Message);
+            }
+        }
+    }
+}
+
+11- volte para a ContaController e importe esse arquivo.
+
+12- Agora precisamos criar cada rota de crud
+
+13- na pasta Commands crie o arquivo InserirContaCommand
+ - Dentro desse arquivo adicione o seguitne código:
+
+namespace ms_usuario.Features.ContaFeature.Commands
+{
+    public class InserirContaCommand : IRequest<InserirContaCommandResponse>
+    {
+        public string Cpf { get; set; }
+        public string Nome { get; set; }
+        public string Telefone { get; set; }
+        public string Email { get; set; }
+    }
+
+    public class InserirContaCommandResponse
+    {
+        public long Id { get; set; }
+        public DateTime DataCadastro { get; set; }
+    }
+
+    public class InserirContaHandler : IRequestHandler<InserirContaCommand, InserirContaCommandResponse>
+    {
+        private readonly IRepository<Conta> _repositoryConta;
+
+        public InserirContaHandler
+        (
+            IRepository<Conta> repositoryConta
+        )
+        {
+            _repositoryConta = repositoryConta;
+        }
+
+        public async Task<InserirContaCommandResponse> Handle
+        (
+            InserirContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            if (request is null)
+                throw new ArgumentNullException(MessageHelper.NullFor<InserirContaCommand>());
+
+            await Validator(request, cancellationToken);
+
+            Conta conta = request.ToDomain();
+
+            await _repositoryConta.AddAsync(conta, cancellationToken);
+            await _repositoryConta.SaveChangesAsync(cancellationToken);
+
+            InserirContaCommandResponse response = new InserirContaCommandResponse();
+            response.DataCadastro = conta.DataCadastro;
+            response.Id = conta.Id;
+
+            return response;
+        }
+
+        private async Task Validator
+        (
+            InserirContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            if (String.IsNullOrEmpty(request.Nome)) throw new ArgumentNullException(MessageHelper.NullFor<InserirContaCommand>(item => item.Nome));
+            if (String.IsNullOrEmpty(request.Telefone)) throw new ArgumentNullException(MessageHelper.NullFor<AtualizarContaCommand>(item => item.Telefone));
+            if (String.IsNullOrEmpty(request.Email)) throw new ArgumentNullException(MessageHelper.NullFor<AtualizarContaCommand>(item => item.Email));
+            if (String.IsNullOrEmpty(request.Cpf)) throw new ArgumentNullException(MessageHelper.NullFor<AtualizarContaCommand>(item => item.Cpf));
+	    if (await ExistsCpfAsync(request, cancellationToken)) throw new ArgumentNullException("Cpf já cadastrado");
+        }
+
+        private async Task<bool> ExistsCpfAsync
+        (
+            InserirContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            return await _repositoryConta.ExistsAsync
+                (
+                    item => item.Cpf.Equals(request.Cpf),
+                    cancellationToken
+                );
+        }
+    }
+}
+
+14- Agora vamos criar a classe Conta
+ - Crie uma nova pasta dentro de ms-usuario com o Nome Domains
+ - dentro dela crie o arquivo c# Entity   ele conterá atributos que estaram em todas as classes:
+
+namespace ms_usuario.Domains
+{
+    public class Entity
+    {
+        public long Id { get; set; }
+        public DateTime DataCadastro { get; set; }
+        public DateTime DataAtualizacao { get; set; }
+    }
+}
+
+ - Posteriormente crie a classe Conta:
+
+namespace ms_usuario.Domains
+{
+    public class Conta : Entity
+    {
+        public string Cpf { get; set; }
+        public string Nome { get; set; }
+        public string Telefone { get; set; }
+        public string Email { get; set; }
+    }
+}
+
+ - Retorne ao arquivo InserirContaCommand e adicione o import: using ms_usuario.Domains;
+
+15- Agora vamos criar um arquivo para cuidar das mensagens
+ - Crie uma pasta em ms-usuario com o nome Helpers
+ - crie o arquivo MessageHelper e adicione o seguinte código:
+
+namespace ms_usuario.Helpers
+{
+    public class MessageHelper
+    {
+        public static string NotFoundFor<T>(T o, Expression<Func<T, object>> property) => $"{typeof(T).Name}.{GetName(property)}: '{GetValue(o, property)}' não encontrado.";
+        public static string NotFoundFor<T>() => $"{typeof(T).Name} não encontrado.";
+
+        public static string InvalidFor<T>(T o, Expression<Func<T, object>> property) => $"{typeof(T).Name}.{GetName(property)}: '{GetValue(o, property)}' inválido.";
+
+        public static string InvalidFor<T>(T o, Expression<Func<T, object>> property, string message) => $"{typeof(T).Name}.{GetName(property)}: '{GetValue(o, property)}' inválido. {message}";
+
+        public static string DuplicateKeyFor<T>(T o, Expression<Func<T, object>> property) => $"{typeof(T).Name}.{GetName(property)}: '{GetValue(o, property)}' já cadastrado.";
+
+        public static string EmptyFor<T>(Expression<Func<T, object>> property) => $"Campo '{typeof(T).Name}.{GetName(property)}' está vazio.";
+
+        public static string NullFor<T>(Expression<Func<T, object>> property) => $"Campo '{typeof(T).Name}.{GetName(property)}' é nulo.";
+
+        public static string NullFor<T>() => $"'{nameof(T)}' é nulo.";
+
+        public static string InactiveFor<T>(T o, Expression<Func<T, object>> property) => $"{typeof(T).Name}.{GetName(property)}: '{GetValue(o, property)}' está inátivo.";
+
+        private static string GetName<T>(Expression<Func<T, object>> property) => GetMemberExpression(property).Member.Name;
+
+        private static string? GetValue<T>(T o, Expression<Func<T, object>> property)
+        {
+            var expr = GetMemberExpression(property);
+            PropertyInfo? prop = expr?.Member as PropertyInfo;
+            object? value = prop?.GetValue(o);
+            return value == null ? "Null" : value.ToString();
+        }
+
+        private static MemberExpression? GetMemberExpression<T>(Expression<Func<T, object>> property)
+        {
+            MemberExpression? member = property.Body as MemberExpression;
+            return member ?? (property.Body is UnaryExpression unary ? unary.Operand as MemberExpression : null);
+        }
+    }
+}
+
+16- Volte ao arquivo InserirContaCommand e adicione o import: using ms_usuario.Helpers;
+
+17- Agora vamos precisar criar os métodos que trabalham com o repositorio da base de dados.
+ - Crie uma nova pasta no ms-usuario chamada Interface
+ - Crie o arquivo IRepository com o seguinte código:
+
+namespace ms_usuario.Interface
+{
+    public interface IRepository<T> where T : Entity
+    {
+        Task<IEnumerable<T>> GetAsync(CancellationToken cancellationToken, params Expression<Func<T, object>>[] joins);
+        Task<IEnumerable<T>> GetAsync(Expression<Func<T, bool>> lambda, CancellationToken cancellationToken, params Expression<Func<T, object>>[] joins);
+        Task<T> GetFirstAsync(Expression<Func<T, bool>> lambda, CancellationToken cancellationToken, params Expression<Func<T, object>>[] joins);
+        Task<T> GetSingleAsync(Expression<Func<T, bool>> lambda, CancellationToken cancellationToken, params Expression<Func<T, object>>[] joins);
+        Task<bool> ExistsAsync(Expression<Func<T, bool>> lambda, CancellationToken cancellationToken);
+        Task AddAsync(T entity, CancellationToken cancellationToken);
+        Task AddCollectionAsync(IEnumerable<T> entities, CancellationToken cancellationToken);
+        Task UpdateAsync(T entity);
+        Task UpdateCollectionAsync(IEnumerable<T> entities);
+        Task RemoveAsync(T entity);
+        Task SaveChangesAsync(CancellationToken cancellationToken);
+        DbConnection Connection { get; }
+    }
+}
+
+ - Agora crie uma nova pasta em ms-usuario chamada Repositories
+ - Crie o arquivo Repository e adicione o seguinte código:
+
+namespace ms_usuario.Repositories
+{
+    public class Repository<T> : IRepository<T> where T : Entity
+    {
+        protected readonly IDbContext _context;
+
+        public Repository(ContaDbContext context)
+        {
+            _context = context;
+        }
+
+        protected IQueryable<T> Query(params Expression<Func<T, object>>[] joins)
+        {
+            var query = _context
+                .Set<T>()
+                .AsQueryable();
+            return joins == null ? query : joins.Aggregate(query, (current, include) => current.Include(include));
+        }
+
+        public virtual async Task<IEnumerable<T>> GetAsync(CancellationToken cancellationToken, params Expression<Func<T, object>>[] joins)
+        {
+            return await Query(joins).ToListAsync(cancellationToken);
+        }
+
+        public virtual async Task<IEnumerable<T>> GetAsync(Expression<Func<T, bool>> lambda, CancellationToken cancellationToken, params Expression<Func<T, object>>[] joins)
+        {
+            return await Query(joins)
+                .Where(lambda)
+                .ToListAsync(cancellationToken);
+        }
+
+        public virtual async Task<T> GetFirstAsync(Expression<Func<T, bool>> lambda, CancellationToken cancellationToken, params Expression<Func<T, object>>[] joins) => await Query(joins).FirstOrDefaultAsync(lambda, cancellationToken);
+
+        public virtual async Task<T> GetSingleAsync(Expression<Func<T, bool>> lambda, CancellationToken cancellationToken, params Expression<Func<T, object>>[] joins) => await Query(joins).SingleOrDefaultAsync(lambda, cancellationToken);
+
+        public virtual async Task<bool> ExistsAsync(Expression<Func<T, bool>> lambda, CancellationToken cancellationToken) => await Query().AnyAsync(lambda, cancellationToken);
+
+
+        public virtual async Task AddAsync(T entity, CancellationToken cancellationToken)
+        {
+            await _context
+                .Set<T>()
+                .AddAsync(entity, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        public virtual async Task AddCollectionAsync(IEnumerable<T> entities, CancellationToken cancellationToken)
+        {
+            await _context
+                .Set<T>()
+                .AddRangeAsync(entities, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        public virtual Task UpdateAsync(T entity)
+        {
+            _context
+                .Set<T>()
+                .Update(entity);
+            return Task.CompletedTask;
+        }
+
+        public virtual Task UpdateCollectionAsync(IEnumerable<T> entities)
+        {
+            _context
+                .Set<T>()
+                .UpdateRange(entities);
+            return Task.CompletedTask;
+        }
+
+        public virtual Task RemoveAsync(T entity)
+        {
+            _context
+                .Set<T>()
+                .Remove(entity);
+            return Task.CompletedTask;
+        }
+
+        public virtual async Task SaveChangesAsync(CancellationToken cancellationToken)
+        {
+            await _context
+                .SaveChangesAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        public DbConnection Connection => _context.Connection;
+    }
+}
+
+ - Agora crie um arquivo c# em ms-usuario com nome IdbContext com o seguinte código:
+
+namespace ms_usuario
+{
+    public interface IDbContext
+    {
+        Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+        DbSet<TEntity> Set<TEntity>() where TEntity : class;
+        DbConnection Connection { get; }
+    }
+}
+
+ - Agora crie o arquivo c# em ms-usuario com o nome ContaDbContext com o seguinte código:
+
+namespace ms_usuario
+{
+    public class ContaDbContext : DbContext, IDbContext
+    {
+        public ContaDbContext(DbContextOptions<ContaDbContext> options) : base(options) { }
+        public DbSet<Conta> Conta { get; set; }
+
+        public DbConnection Connection => base.Database.GetDbConnection();
+    }
+}
+
+18- Volte ao arquivo InserirContaCommand e adicione o import: using ms_usuario.Interface;
+
+19- na pasta Extensionss crie o arquivo ContaExtensions e adicione o seguinte código:
+
+namespace ms_usuario.Extensions
+{
+    public static class ContaExtensions
+    {
+        public static Conta ToDomain(this InserirContaCommand request)
+        {
+            return new()
+            {
+                Cpf = request.Cpf,
+                Nome = request.Nome,
+                Email = request.Email,
+                Telefone = request.Telefone,
+                DataCadastro = DateTime.Now
+            };
+        }
+    }
+}
+
+20- Volte ao arquivo InserirContaCommand e adicione o seguinte import: using ms_usuario.Extensions;
+
+21- Volte ao arquivo ContaController e adicione o seuginte import: using ms_usuario.Features.ContaFeature.Commands;
+
+22- Agora vamos criar o command de Atualizar conta, na pasta Commands crie o arquivo AtualizarContaCommand e adicione o seguinte arquivo:
+
+namespace ms_usuario.Features.ContaFeature.Commands
+{
+    public class AtualizarContaCommand : IRequest<AtualizarContaCommandResponse>
+    {
+        public long Id { get; set; }
+        public string Cpf { get; set; }
+        public string Nome { get; set; }
+        public string Telefone { get; set; }
+        public string Email { get; set; }
+    }
+
+    public class AtualizarContaCommandResponse
+    {
+        public DateTime DataAtualizacao { get; set; }
+    }
+
+    public class AtualizarContaHandler : IRequestHandler<AtualizarContaCommand, AtualizarContaCommandResponse>
+    {
+        private readonly IRepository<Conta> _repositoryConta;
+
+        public AtualizarContaHandler
+        (
+            IRepository<Conta> repositoryConta
+        )
+        {
+            _repositoryConta = repositoryConta;
+        }
+
+        public async Task<AtualizarContaCommandResponse> Handle
+        (
+            AtualizarContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            if (request is null)
+                throw new ArgumentNullException(MessageHelper.NullFor<AtualizarContaCommand>());
+
+            await Validator(request, cancellationToken);
+
+            Conta conta = await GetFirstAsync(request, cancellationToken);
+            conta.Nome = request.Nome;
+            conta.Cpf = request.Cpf;
+            conta.Email = request.Email;
+            conta.Telefone = request.Telefone;
+
+            await _repositoryConta.UpdateAsync(conta);
+            await _repositoryConta.SaveChangesAsync(cancellationToken);
+
+            AtualizarContaCommandResponse response = new AtualizarContaCommandResponse();
+            response.DataAtualizacao = conta.DataAtualizacao;
+
+            return response;
+        }
+
+        private async Task Validator
+        (
+            AtualizarContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            if (request.Id <= 0) throw new ArgumentNullException(MessageHelper.NullFor<AtualizarContaCommand>(item => item.Id));
+            if (String.IsNullOrEmpty(request.Nome)) throw new ArgumentNullException(MessageHelper.NullFor<AtualizarContaCommand>(item => item.Nome));
+            if (String.IsNullOrEmpty(request.Telefone)) throw new ArgumentNullException(MessageHelper.NullFor<AtualizarContaCommand>(item => item.Telefone));
+            if (String.IsNullOrEmpty(request.Email)) throw new ArgumentNullException(MessageHelper.NullFor<AtualizarContaCommand>(item => item.Email));
+            if (String.IsNullOrEmpty(request.Cpf)) throw new ArgumentNullException(MessageHelper.NullFor<AtualizarContaCommand>(item => item.Cpf));
+            if (!(await ExistsAsync(request, cancellationToken))) throw new ArgumentNullException("Conta não encontrada");
+            if (await ExistsCpfAsync(request, cancellationToken)) throw new ArgumentNullException("Cpf já cadastrado");
+        }
+
+        private async Task<Conta> GetFirstAsync
+        (
+            AtualizarContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            return await _repositoryConta.GetFirstAsync
+                (
+                    item => item.Id.Equals(request.Id),
+                    cancellationToken
+                );
+        }
+
+        private async Task<bool> ExistsAsync
+        (
+            AtualizarContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            return await _repositoryConta.ExistsAsync
+                (
+                    item => item.Id.Equals(request.Id),
+                    cancellationToken
+                );
+        }
+
+        private async Task<bool> ExistsCpfAsync
+        (
+            AtualizarContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            return await _repositoryConta.ExistsAsync
+                (
+                    item => item.Cpf.Equals(request.Cpf) &&
+                    !item.Id.Equals(request.Id),
+                    cancellationToken
+                );
+        }
+    }
+}
+
+23- Agora criar em Commands o arquivo RemoverContaCommand com o seguinte código
+
+namespace ms_usuario.Features.ContaFeature.Commands
+{
+    public class RemoverContaCommand : IRequest<RemoverContaCommandResponse>
+    {
+        public long Id { get; set; }
+    }
+
+    public class RemoverContaCommandResponse
+    {
+        public long Id { get; set; }
+    }
+
+    public class RemoverContaCommandHandler : IRequestHandler<RemoverContaCommand, RemoverContaCommandResponse>
+    {
+        private readonly IRepository<Conta> _repository;
+
+        public RemoverContaCommandHandler
+        (
+            IRepository<Conta> repository
+        )
+        {
+            _repository = repository;
+        }
+
+        public async Task<RemoverContaCommandResponse> Handle
+        (
+            RemoverContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            if (request is null)
+                throw new ArgumentNullException(MessageHelper.NullFor<RemoverContaCommand>());
+
+            await Validator(request, cancellationToken);
+
+            Conta conta = await _repository.GetFirstAsync(item => item.Id.Equals(request.Id), cancellationToken);
+
+            await _repository.RemoveAsync(conta);
+            await _repository.SaveChangesAsync(cancellationToken);
+
+            RemoverContaCommandResponse response = new RemoverContaCommandResponse();
+            response.Id = conta.Id;
+
+            return response;
+        }
+
+        private async Task Validator
+        (
+            RemoverContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            if (!(await ExistsAsync(request, cancellationToken))) throw new ArgumentNullException("Conta não encontrada");
+        }
+
+        private async Task<bool> ExistsAsync
+        (
+            RemoverContaCommand request,
+            CancellationToken cancellationToken
+        )
+        {
+            return await _repository.ExistsAsync
+                (
+                    item => item.Id.Equals(request.Id),
+                    cancellationToken
+                );
+        }
+    }
+}
+
+24- Agora vamos criar os arquivos de busca, em queries crie o arquivo SelecionarContaByIdQuery e adicione o seguinte código
+
+namespace ms_usuario.Features.ContaFeature.Queries
+{
+    public class SelecionarContaByIdQuery : IRequest<SelecionarContaByIdQueryResponse>
+    {
+        public long Id { get; set; }
+    }
+
+    public class SelecionarContaByIdQueryResponse : Entity
+    {
+        public long Id { get; set; }
+        public string Cpf { get; set; }
+        public string Nome { get; set; }
+        public string Telefone { get; set; }
+        public string Email { get; set; }
+    }
+
+    public class SelecionarContaByIdQueryHandler : IRequestHandler<SelecionarContaByIdQuery, SelecionarContaByIdQueryResponse>
+    {
+        private readonly IRepository<Conta> _repository;
+
+        public SelecionarContaByIdQueryHandler
+        (
+            IRepository<Conta> repository
+        )
+        {
+            _repository = repository;
+        }
+
+        public async Task<SelecionarContaByIdQueryResponse> Handle
+        (
+            SelecionarContaByIdQuery request,
+            CancellationToken cancellationToken
+        )
+        {
+            if (request is null)
+                throw new ArgumentNullException(MessageHelper.NullFor<SelecionarContaByIdQuery>());
+
+            Conta conta = await GetFirstAsync(request, cancellationToken);
+
+            Validator(conta, cancellationToken);
+
+            SelecionarContaByIdQueryResponse response = new SelecionarContaByIdQueryResponse();
+
+            response.Cpf = conta.Cpf;
+            response.Nome = conta.Nome;
+            response.Email = conta.Email;
+            response.Telefone = conta.Telefone;
+            response.DataCadastro = conta.DataCadastro;
+            response.DataAtualizacao = conta.DataAtualizacao;
+            response.Id = conta.Id;
+
+            return response;
+        }
+
+        private async void Validator
+        (
+            Conta conta,
+            CancellationToken cancellationToken
+        )
+        {
+            if (conta is null) throw new ArgumentNullException("Conta não encontrada");
+        }
+
+        private async Task<Conta> GetFirstAsync
+        (
+            SelecionarContaByIdQuery request,
+            CancellationToken cancellationToken
+        )
+        {
+            return await _repository.GetFirstAsync
+                (
+                    item => item.Id.Equals(request.Id),
+                    cancellationToken
+                );
+        }
+    }
+}
+
+25- Agora vamos fazer para selecionar todas as contas, crie o arquivo SelecionarContaFiltersQuery e adicione o código
+
+namespace ms_usuario.Features.ContaFeature.Queries
+{
+    public class SelecionarContaFiltersQuery : IRequest<IEnumerable<SelecionarContaFiltersQueryResponse>>
+    {
+    }
+
+    public class SelecionarContaFiltersQueryResponse : Entity
+    {
+        public long Id { get; set; }
+        public string Cpf { get; set; }
+        public string Nome { get; set; }
+        public string Telefone { get; set; }
+        public string Email { get; set; }
+    }
+
+    public class SelecionarContaFiltersQueryResponseHandler : IRequestHandler<SelecionarContaFiltersQuery, IEnumerable<SelecionarContaFiltersQueryResponse>>
+    {
+        private readonly IRepository<Conta> _repository;
+
+        public SelecionarContaFiltersQueryResponseHandler
+        (
+            IRepository<Conta> repository
+        )
+        {
+            _repository = repository;
+        }
+
+        public async Task<IEnumerable<SelecionarContaFiltersQueryResponse>> Handle
+        (
+            SelecionarContaFiltersQuery request,
+            CancellationToken cancellationToken
+        )
+        {
+            if (request is null)
+                throw new ArgumentNullException(MessageHelper.NullFor<SelecionarContaFiltersQuery>());
+
+            IEnumerable<Conta> contaMany = await _repository.GetAsync(cancellationToken);
+
+            List<SelecionarContaFiltersQueryResponse> responseMany = new List<SelecionarContaFiltersQueryResponse>();
+
+            foreach (Conta conta in contaMany)
+            {
+                SelecionarContaFiltersQueryResponse response = new SelecionarContaFiltersQueryResponse();
+                response.Cpf = conta.Cpf;
+                response.Nome = conta.Nome;
+                response.Email = conta.Email;
+                response.Telefone = conta.Telefone;
+                response.DataCadastro = conta.DataCadastro;
+                response.DataAtualizacao = conta.DataAtualizacao;
+                response.Id = conta.Id;
+                responseMany.Add(response);
+            }
+
+            return responseMany;
+        }
+    }
+}
+
+26- Volte a ContaController e adicione o seguinte import: using ms_usuario.Features.ContaFeature.Queries;
+ - Verifique se não tem nenhum erro nesse arquivo
+
+27- agora vamos configurar o micro serviço, acesse o arquivo Program.cs em ms-usuario
+ - Adicione o seguinte código no início  (o var builder já vai existir):
+
+var MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(name: MyAllowSpecificOrigins,
+                      policy =>
+                      {
+                          policy
+                          .AllowAnyOrigin()
+                          .AllowAnyHeader()
+                          .AllowAnyMethod();
+                      });
+});
+
+ - Agora abaixo da linha com o comando: builder.Services.AddControllers();
+ - Adicione essas linhas:
+
+   builder.Services.SetupDbContext(builder.Configuration.GetValue<string>("ConnectionStrings:DbContext"));
+   builder.Services.SetupRepositories();
+
+ - Essas duas linhas vão dar erro, precisamos criar os métodos.
+ - Crie em extensions o arquivo ServiceCollectionExtensions com o seguinte código:
+
+namespace ms_usuario.Extensions
+{
+    public static class ServiceCollectionExtensions
+    {
+        public static void SetupRepositories(this IServiceCollection services)
+        {
+            services.AddScoped(typeof(IRepository<Conta>), typeof(Repository<Conta>));
+        }
+
+        public static void SetupDbContext(this IServiceCollection services, string? connectionString)
+        {
+            services.AddDbContext<ContaDbContext>(options =>
+                options.UseNpgsql(connectionString, b => b.MigrationsAssembly(typeof(ContaDbContext).Assembly.FullName)),
+                ServiceLifetime.Transient, ServiceLifetime.Transient
+                );
+        }
+    }
+}
+
+ - Volte ao arquivo Program.cs e adicione o import: using ms_usuario.Extensions;
+
+ - Agora abaixo da linha de código: builder.Services.AddSwaggerGen();
+ - Adicione a seguinte linha de código:
+
+ builder.Services.AddMediatR(x => x.RegisterServicesFromAssemblies(typeof(Conta).Assembly));
+
+ - E faça o import: using ms_usuario.Domains;
+
+ - Adicione Abaixo da linha de código: var app = builder.Build();
+
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
+ - Adicione acima da linha de código: app.UseHttpsRedirection();
+
+app.UseCors(MyAllowSpecificOrigins);
+ 
+ - E abaixo do código: app.UseHttpsRedirection();
+
+app.UseRouting();
+
+ - por fim acima do código: app.Run()
+
+app.Services.CreateScope().ServiceProvider.GetRequiredService<ContaDbContext>().Database.Migrate();
+
+ - E adicione os dois imports:
+
+using Microsoft.EntityFrameworkCore;
+using ms_usuario;
+
+28- Agora vamos adicionar a migrations que vai criar nosso banco de dados
+ - em appSettings.json vamos criar a conexão com o banco, coloque o código abaixo da linha 8 ("AllowedHosts": "*")
+
+"ConnectionStrings": {
+    "DbContext": "Host=localhost;Port=5432;Pooling=true;Database=usuario;User Id=postgres;Password=admin"
+ },
+
+ - Agora acesse a aba Ferramentas, Gerenciador de pacotes nuget e clique em console do gerenciador de nuget
+ - E escreve no console: Add-Migration InitialMigration
+
+29- Baixe o pgAdmin, instale se pedir para oclocar id e senha coloque id como postgres e senha admin e crie um database usuario 
+
+30- no visual studio antes de dar clique em compilação e compilar solução, veja se nao deu erro.
+
+31- Agora antes de dar play verifique se o projeto selecionado está ms_usuario e não docker.   
+
+32- Rode o programa, deve abrir uma nova janela do swagger com as rotas que criamos.
+
+33- Veja no pgAdmin, se precisar atualize o banco de dados e verifique no database usuario se a tabela conta foi criada.
+
+34- Agora baixe o programa postman, assim vamos poder testar as rotas que criamos e se está conectado com o banco de dados
